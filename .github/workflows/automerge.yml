@@ -1,0 +1,28 @@
+name: Automerge
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["PR Validate"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  automerge:
+    name: automerge
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run' || contains(github.event.pull_request.labels.*.name, 'automerge-approved')
+    steps:
+      - name: Checkout trusted base branch
+        uses: actions/checkout@v4
+
+      - name: Merge approved PR after required checks pass
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEX_AUTOMERGE_REQUIRED_CHECKS: pr-validate
+        run: python3 scripts/github-automerge.py

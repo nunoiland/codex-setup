@@ -1,0 +1,90 @@
+name: PR Validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  pr-validate:
+    name: pr-validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.9.0
+          cache: pnpm
+
+      - name: Install starter dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Annotate workflow issues with actionlint
+        uses: reviewdog/action-actionlint@v1.72.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check
+          fail_level: error
+
+      - name: Prepare Trivy evidence directory
+        run: mkdir -p codex_runtime_state/actions/security
+
+      - name: Run non-blocking Trivy security scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        continue-on-error: true
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          severity: HIGH,CRITICAL
+          format: table
+          output: codex_runtime_state/actions/security/trivy-pr-scan.txt
+          exit-code: "0"
+
+      - name: Publish Trivy summary
+        if: always()
+        run: |
+          {
+            echo "### Trivy security scan"
+            echo ""
+            if [ -s codex_runtime_state/actions/security/trivy-pr-scan.txt ]; then
+              echo "Non-blocking HIGH/CRITICAL vulnerability and misconfiguration report was generated."
+              echo ""
+              echo '```text'
+              sed -n '1,120p' codex_runtime_state/actions/security/trivy-pr-scan.txt
+              echo '```'
+              echo ""
+              echo "Full report is included in the PR evidence artifact."
+            else
+              echo "No Trivy report was generated. The scan is non-blocking in phase 1."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run API-key-free validation
+        env:
+          CODEX_VALIDATE_REQUIRE_CODEX: "0"
+        run: ./scripts/ci-pr-check.sh
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-pr-evidence-${{ github.run_id }}
+          path: |
+            codex_runtime_state/actions/**
+            codex_runtime_state/browser-qa/**
+            codex_runtime_state/harness/**
+          if-no-files-found: warn

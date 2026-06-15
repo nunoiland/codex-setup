@@ -1,0 +1,48 @@
+name: Nightly Harness
+
+on:
+  schedule:
+    # 03:17 Asia/Seoul. GitHub cron is UTC.
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-harness:
+    name: nightly-harness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.9.0
+          cache: pnpm
+
+      - name: Install starter dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run nightly dry-run harness
+        env:
+          CODEX_VALIDATE_REQUIRE_CODEX: "0"
+        run: ./scripts/ci-pr-check.sh
+
+      - name: Upload nightly evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-nightly-evidence-${{ github.run_id }}
+          path: |
+            codex_runtime_state/actions/**
+            codex_runtime_state/browser-qa/**
+            codex_runtime_state/harness/**
+          if-no-files-found: warn
